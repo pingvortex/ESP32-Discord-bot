@@ -21,7 +21,7 @@ A native Discord bot running on an ESP32 using WebSockets. This project allows y
 
 * `>:test` - Checks if the bot is responding and see some stats.
 * `>:ping` - Measures the latency of the ESP32.
-* `>:say <message>` - Makes the bot echo text.
+* `>:say <message>` - Makes the bot echo a text you say.
 * `>:flip` - Flips a coin.
 
 ## Setup Instructions
