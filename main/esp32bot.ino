@@ -220,7 +220,7 @@ void setup() {
     display.setTextColor(WHITE);
     
     updateDisplay("Connecting to WiFi...");
-    WiFi.begin(wifiName.c_str(), wifiPassword.c_str());
+    WiFi.begin(wifiName, wifiPassword);
     while (WiFi.status() != WL_CONNECTED) delay(500);
 
     updateDisplay("Connecting to Discord...");
