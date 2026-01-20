@@ -30,7 +30,9 @@
 
 #include <Adafruit_SSD1306.h>
 
-#define WEBSOCKETS_NETWORK_TYPE NETWORK_ESP32#include <WebSockets2_Generic.h>
+#define WEBSOCKETS_NETWORK_TYPE NETWORK_ESP32
+
+#include <WebSockets2_Generic.h>
 
 #include <ArduinoJson.h>
 
@@ -54,20 +56,51 @@ WebsocketsClient client;
 
 unsigned long lastHeartbeat = 0;
 unsigned long heartbeatInterval = 40000;
+unsigned long lastDisplayUpdate = 0;
+long lastLatency = 0;
 bool isConnected = false;
 
 DynamicJsonDocument doc(3072);
 
-void updateDisplay(String status, String lastMsg = "") {
+void updateDisplay(String status) {
   display.clearDisplay();
   display.setCursor(0, 0);
   display.println(botName);
   display.println("Status: " + status);
   display.println("---------------------");
-  if (lastMsg != "") {
-    display.print("> ");
-    display.println(lastMsg);
-  }
+
+  // ping
+  display.print("Ping: ");
+  display.print(lastLatency);
+  display.println("ms");
+
+  // memory usage
+  uint32_t freeHeap = ESP.getFreeHeap();
+  uint32_t totalHeap = ESP.getHeapSize();
+  float usagePercent = 100.0 * (1.0 - ((float) freeHeap / (float) totalHeap));
+  display.print("Mem: ");
+  display.print(usagePercent, 1);
+  display.println("%");
+
+  // temp
+  float temp_c = (temprature_sens_read() - 32) / 1.8;
+  display.print("Temp: ");
+  display.print(temp_c, 1);
+  display.println(" C");
+
+  // uptime
+  unsigned long totalSeconds = millis() / 1000;
+  unsigned long days = totalSeconds / 86400;
+  unsigned long hours = (totalSeconds % 86400) / 3600;
+  unsigned long minutes = (totalSeconds % 3600) / 60;
+  display.print("UP: ");
+  display.print(days);
+  display.print("d ");
+  display.print(hours);
+  display.print("h ");
+  display.print(minutes);
+  display.println("m");
+
   display.display();
 }
 
@@ -104,7 +137,8 @@ long sendMessage(const char * channelId, String content) {
     int httpCode = http.POST(payload);
     http.end();
   }
-  return millis() - startSend;
+  lastLatency = millis() - startSend;
+  return lastLatency;
 }
 
 void sendEmbed(const char * channelId, String title, String description, uint32_t color) {
@@ -150,28 +184,22 @@ void onMessageCallback(WebsocketsMessage message) {
 
       // --->:test ---
       if (msg.indexOf(">:test") >= 0) {
-        updateDisplay("CMD: Test");
-
         unsigned long totalSeconds = millis() / 1000;
         unsigned long days = totalSeconds / 86400;
         unsigned long hours = (totalSeconds % 86400) / 3600;
         unsigned long minutes = (totalSeconds % 3600) / 60;
         unsigned long seconds = totalSeconds % 60;
 
-        // temp
         float temp_c = (temprature_sens_read() - 32) / 1.8;
 
-        // memory usage
         uint32_t freeHeap = ESP.getFreeHeap();
         uint32_t totalHeap = ESP.getHeapSize();
         float usagePercent = 100.0 * (1.0 - ((float) freeHeap / (float) totalHeap));
 
         String runtime = String(days) + "d " + String(hours) + "h " + String(minutes) + "m " + String(seconds) + "s";
 
-        // send normal message
         long latency = sendMessage(channelId, "im working :scream:");
 
-        // send embed
         String embedDesc = "**System Info:**\n";
         embedDesc += "**Ping:** " + String(latency) + "ms\n";
         embedDesc += "**Memory Usage:** " + String(usagePercent, 1) + "% (" + String(freeHeap / 1024) + " KB free)\n";
@@ -181,29 +209,13 @@ void onMessageCallback(WebsocketsMessage message) {
         sendEmbed(channelId, "Bot Status", embedDesc, 5763719);
       }
 
-      // --->:ping ---
-      else if (msg.indexOf(">:ping") >= 0) {
-        updateDisplay("CMD: Pinging...");
-        long latency = sendMessage(channelId, "im a slow clanka pls wait...");
-
-        String result = "**Latency:** " + String(latency) + "ms";
-        sendEmbed(channelId, "Pong!", result, 16711680);
-        updateDisplay(String(latency) + "ms");
-      }
-
       // --->:echo ---
       else if (msg.startsWith(">:echo ")) {
         int firstSpace = msg.indexOf(' ', 7);
         if (firstSpace != -1) {
           String targetChannel = msg.substring(7, firstSpace);
           String echoContent = msg.substring(firstSpace + 1);
-
-          updateDisplay("Echoing...", targetChannel);
           sendMessage(targetChannel.c_str(), echoContent);
-
-          sendMessage(channelId, "Message sent to <#" + targetChannel + ">");
-        } else {
-          sendMessage(channelId, "Usage: `>:echo <channel_id> <message>`");
         }
       }
 
@@ -211,7 +223,6 @@ void onMessageCallback(WebsocketsMessage message) {
       else if (msg.indexOf(">:flip") >= 0) {
         String side = (random(0, 2) == 0) ? "Heads" : "Tails";
         sendMessage(channelId, "Result: " + side);
-        updateDisplay("Flipped: " + side);
       }
 
       // --->:rng ---
@@ -223,13 +234,8 @@ void onMessageCallback(WebsocketsMessage message) {
 
           if (maxVal > minVal) {
             long result = random(minVal, maxVal + 1);
-            updateDisplay("RNG Result", String(result));
             sendMessage(channelId, "Rolled (" + String(minVal) + "-" + String(maxVal) + "): **" + String(result) + "**");
-          } else {
-            sendMessage(channelId, "Max must be greater than min!");
           }
-        } else {
-          sendMessage(channelId, "Usage: >:rng <min> <max>");
         }
       }
     }
@@ -282,5 +288,13 @@ void loop() {
     serializeJson(hb, hbOut);
     client.send(hbOut);
     lastHeartbeat = millis();
+  }
+
+  // refresh stats every 5 seconds
+  if (millis() - lastDisplayUpdate > 5000) {
+    if (isConnected) {
+      updateDisplay("Online");
+    }
+    lastDisplayUpdate = millis();
   }
 }
